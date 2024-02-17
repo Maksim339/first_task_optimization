@@ -1,7 +1,3 @@
-% additional_noisy_measurements.m
-% Здесь используется переменная y_values из файла noisy_measurements.m
-% Убедитесь, что noisy_measurements.m запущен перед этим файлом
-
 v = zeros(size(x));
 for i = 1:length(v)
     if rand() < 0.1

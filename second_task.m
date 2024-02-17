@@ -1,7 +1,3 @@
-% noisy_measurements.m
-% Здесь используется переменная a_value из предыдущего файла
-% Убедитесь, что build_polynomial.m запущен перед этим файлом
-
 x = 0:0.1:10;
 y_values = arrayfun(@(x) a_value(1) + a_value(2)*x + a_value(3)*x.^2 + a_value(4)*x.^3 + a_value(5)*x.^4 + a_value(6)*x.^5, x);
 w = sqrt(0.3) * randn(size(x));

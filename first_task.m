@@ -1,4 +1,3 @@
-% build_polynomial.m
 yalmip('clear');
 clc;
 
