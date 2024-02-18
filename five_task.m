@@ -2,121 +2,90 @@
 yalmip('clear');
 clc;
 
-% Определение переменных для коэффициентов многочлена
-a = sdpvar(6,1);
+% Определение переменных для точного многочлена
+a_exact = sdpvar(6,1);
 
-% Формирование ограничений и вектора точек x
-Constraints = [];
+% Функция для точного многочлена
+p_exact = @(x) a_exact(1) + a_exact(2)*x + a_exact(3)*x.^2 + a_exact(4)*x.^3 + a_exact(5)*x.^4 + a_exact(6)*x.^5;
+
+% Формирование вектора точек x
 x = 0:0.1:10;
+
+% Определение ограничений
 Constraints = [];
 for i = 1:length(x)
-    Constraints = [Constraints, 0 <= p(x(i)) <= 5];
+    Constraints = [Constraints, 0 <= p_exact(x(i)) <= 5];
 end
+Constraints = [Constraints, p_exact(0) <= 1, p_exact(3) >= 4, p_exact(7) <= 1, 2 <= p_exact(10) <= 3];
 
-Constraints = [Constraints, p(0) <= 1, p(3) >= 4, p(7) <= 1, 2 <= p(10) <= 3];
+% Целевая функция
+Objective = a_exact(1)^2 + a_exact(2)^2 + a_exact(3)^2 + a_exact(4)^2 + a_exact(5)^2 + a_exact(6)^2;
 
-% Определение целевой функции
-Objective = a(6)^2 + a(5)^2 + a(4)^2;
+% Настройка параметров решателя
+options = sdpsettings('solver','sdpt3');
 
 % Решение задачи оптимизации
-options = sdpsettings('solver','sdpt3');
 sol = optimize(Constraints,Objective,options);
 
-
-% Проверка, была ли задача решена
 if sol.problem == 0
-    % Решение найдено
-    a_value = value(a);
-    
-    % Вычисление истинных значений многочлена
+    a_value = value(a_exact);
     y_values = arrayfun(@(x) a_value(1) + a_value(2)*x + a_value(3)*x^2 + a_value(4)*x^3 + a_value(5)*x^4 + a_value(6)*x^5, x);
     
+    % Генерация зашумленных данных
+    w = sqrt(0.3) * randn(size(x));
     v = zeros(size(x));
-for i = 1:length(v)
-    if rand() < 0.1
-        % Генерация значений в диапазоне [-20, -10] U [10, 20]
-        v(i) = 10 + 10 * rand();
-        if rand() < 0.5
-            v(i) = -v(i);
+    for i = 1:length(v)
+        if rand() < 0.1
+            v(i) = 10 + 10 * rand();
+            if rand() < 0.5
+                v(i) = -v(i);
+            end
         end
     end
-end
+    z_values = y_values + w + v;
 
-% Вычисление новых зашумленных измеренных значений
-z_values_new = y_values + w + v;
+    % Определение отдельных переменных для каждой аппроксимации
+    a_ls = sdpvar(6,1);
+    a_l1 = sdpvar(6,1);
+    a_penalty = sdpvar(6,1);
+    a_chebyshev = sdpvar(6,1);
 
-% Построение графика истинных значений многочлена и новых зашумленных измерений
-figure;
-plot(x, y_values, 'b', 'LineWidth', 2);
-hold on;
-plot(x, z_values_new, 'r', 'LineWidth', 2);
-grid on;
-xlabel('x');
-ylabel('Values');
-title('Истинные значения многочлена и новые зашумленные измерения');
-legend('Истинные значения', 'Новые зашумленные измерения');
+    % Метод наименьших квадратов
+    Objective_least_squares = norm(z_values - (a_ls(1) + a_ls(2)*x + a_ls(3)*x.^2 + a_ls(4)*x.^3 + a_ls(5)*x.^4 + a_ls(6)*x.^5), 2);
+    optimize(Constraints, Objective_least_squares, options);
+    y_least_squares = value(a_ls(1) + a_ls(2)*x + a_ls(3)*x.^2 + a_ls(4)*x.^3 + a_ls(5)*x.^4 + a_ls(6)*x.^5);
+
+    % Минимизация суммы модулей ошибок
+    Objective_l1 = norm(z_values - (a_l1(1) + a_l1(2)*x + a_l1(3)*x.^2 + a_l1(4)*x.^3 + a_l1(5)*x.^4 + a_l1(6)*x.^5), 1);
+    optimize(Constraints, Objective_l1, options);
+    y_l1 = value(a_l1(1) + a_l1(2)*x + a_l1(3)*x.^2 + a_l1(4)*x.^3 + a_l1(5)*x.^4 + a_l1(6)*x.^5);
+
+    % Минимизация суммы значений штрафной функции
+    fun_penalty = @(a) sum(sqrt(abs(z_values - (a(1) + a(2)*x + a(3)*x.^2 + a(4)*x.^3 + a(5)*x.^4 + a(6)*x.^5))));
+    a0_penalty = zeros(6, 1); % Начальная точка для оптимизации
+    options_penalty = optimoptions('fmincon', 'Display', 'iter', 'Algorithm', 'sqp');
+    [a_penalty_optimized, ~] = fmincon(fun_penalty, a0_penalty, [], [], [], [], [], [], [], options_penalty);
+    y_penalty_numeric = a_penalty_optimized(1) + a_penalty_optimized(2)*x + a_penalty_optimized(3)*x.^2 + a_penalty_optimized(4)*x.^3 + a_penalty_optimized(5)*x.^4 + a_penalty_optimized(6)*x.^5;
+
+    % Чебышевская аппроксимация
+    Objective_chebyshev = norm(z_values - (a_chebyshev(1) + a_chebyshev(2)*x + a_chebyshev(3)*x.^2 + a_chebyshev(4)*x.^3 + a_chebyshev(5)*x.^4 + a_chebyshev(6)*x.^5), 'inf');
+    optimize(Constraints, Objective_chebyshev, options);
+    y_chebyshev = value(a_chebyshev(1) + a_chebyshev(2)*x + a_chebyshev(3)*x.^2 + a_chebyshev(4)*x.^3 + a_chebyshev(5)*x.^4 + a_chebyshev(6)*x.^5);
+
+    % Построение графика всех результатов
+    figure;
+    plot(x, y_values, 'b', 'LineWidth', 2); % Истинные значения
+    hold on;
+    plot(x, z_values, 'r', 'LineWidth', 2); % Зашумленные измерения
+    plot(x, y_least_squares, 'g', 'LineWidth', 2); % Наименьшие квадраты
+    plot(x, y_l1, 'm', 'LineWidth', 2); % Минимизация суммы модулей ошибок
+    plot(x, y_penalty_numeric, 'c', 'LineWidth', 2); % Штрафная функция
+    plot(x, y_chebyshev, 'k', 'LineWidth', 2); % Чебышевская аппроксимация
+    legend('Истинные значения', 'Зашумленные измерения', 'Наименьшие квадраты', 'Минимизация суммы модулей ошибок', 'Штрафная функция', 'Чебышевская аппроксимация');
+    grid on;
+    xlabel('x');
+    ylabel('Values');
+    title('Сравнение различных методов аппроксимации');
 else
     disp('Не удалось найти решение');
 end
-
-% 1. Метод наименьших квадратов
-coeffs_least_squares = polyfit(x, z_values, 5);
-y_least_squares = polyval(coeffs_least_squares, x);
-
-% 2. Минимизация суммы модулей ошибок
-error_function = @(coeffs) sum(abs(polyval(coeffs, x) - z_values));
-initial_coeffs_l1 = zeros(1, 6);
-coeffs_l1 = fminsearch(error_function, initial_coeffs_l1);
-y_l1 = polyval(coeffs_l1, x);
-
-% 3. Минимизация суммы значений штрафной функции
-penalty_function = @(coeffs) sum(abs(polyval(coeffs, x) - z_values).^0.5);
-initial_coeffs_penalty = zeros(1, 6);
-coeffs_penalty = fminsearch(penalty_function, initial_coeffs_penalty);
-y_penalty = polyval(coeffs_penalty, x);
-
-% 4. Чебышевская аппроксимация
-% Инициализация начальных коэффициентов и определение функции ошибки
-initial_coeffs_chebyshev = zeros(1, 6);
-chebyshev_error_function = @(coeffs) max(abs(polyval(coeffs, x) - z_values));
-
-% Использование fminsearch для минимизации максимального отклонения
-coeffs_chebyshev = fminsearch(chebyshev_error_function, initial_coeffs_chebyshev);
-y_chebyshev = polyval(coeffs_chebyshev, x);
-
-% Рассчет ошибок
-l2_error_least_squares = calculateL2Error(y_values, y_least_squares);
-l2_error_l1 = calculateL2Error(y_values, y_l1);
-l2_error_penalty = calculateL2Error(y_values, y_penalty);
-l2_error_chebyshev = calculateL2Error(y_values, y_chebyshev);
-
-
-disp(['L2 ошибка наименьших квадратов: ', num2str(l2_error_least_squares)]);
-disp(['L2 ошибка минимизации суммы модулей ошибок: ', num2str(l2_error_l1)]);
-disp(['L2 ошибка штрафной функции: ', num2str(l2_error_penalty)]);
-disp(['L2 ошибка Чебышевской аппроксимации: ', num2str(l2_error_chebyshev)]);
-
-
-figure;
-plot(x, y_values, 'b', 'LineWidth', 2); 
-hold on;
-plot(x, y_least_squares, 'g', 'LineWidth', 2);
-plot(x, y_l1, 'm', 'LineWidth', 2); 
-plot(x, y_penalty, 'c', 'LineWidth', 2); 
-plot(x, y_chebyshev, 'k', 'LineWidth', 2); 
-legend('Истинные значения', 'Наименьшие квадраты', 'Минимизация суммы модулей ошибок', 'Штрафная функция', 'Чебышевская аппроксимация');
-grid on;
-xlabel('x');
-ylabel('Values');
-title('Сравнение различных методов аппроксимации');
-
-function l2_error = calculateL2Error(true_values, approx_values)
-    % Вычисление L2 ошибки между истинными и аппроксимированными значениями
-    l2_error = sqrt(mean((true_values - approx_values).^2));
-end
-
-
-
-
-
-
